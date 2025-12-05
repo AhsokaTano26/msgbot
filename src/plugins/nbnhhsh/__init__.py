@@ -1,8 +1,10 @@
 from nonebot import get_plugin_config, logger, on_regex
 from nonebot.plugin import PluginMetadata
 from nonebot.params import RegexStr
+from nonebot.adapters import Event  # [新增] 引入 Event 以获取用户ID
 import httpx
 import re
+import time  # [新增] 引入 time 模块
 
 from .config import Config
 
@@ -28,10 +30,37 @@ nbnhhsh_macher = on_regex(
     regular_expression, priority=10, block=True, flags=re.IGNORECASE
 )
 
+# [新增] 配置冷却时间（秒）
+COOLDOWN_SECONDS = 10
+# [新增] 用于存储用户最后请求时间的字典
+user_last_request = {}
 
 @nbnhhsh_macher.handle()
-async def handle_nbnhhsh(keyword: str = RegexStr()):
-    logger.info(f"原始 keywordGroup: {keyword}")  # 添加这一行以检查原始 keywordGroup
+async def handle_nbnhhsh(event: Event, keyword: str = RegexStr()): # [修改] 添加 event 参数
+    global user_last_request
+
+    # [新增] --- 冷却时间检查逻辑开始 ---
+    user_id = event.get_user_id()
+    current_time = time.time()
+
+    # 清理过大的缓存防止内存泄漏（仿照下方 Guess 的逻辑）
+    if len(user_last_request) > 1024:
+        user_last_request = {}
+
+    if user_id in user_last_request:
+        time_diff = current_time - user_last_request[user_id]
+        if time_diff < COOLDOWN_SECONDS:
+            logger.info(f"用户 {user_id} 请求过快，剩余冷却: {COOLDOWN_SECONDS - time_diff:.2f}s")
+            # 这里可以选择直接 return 忽略，或者发送提示
+            # await nbnhhsh_macher.finish(f"歇一歇吧，请 {int(COOLDOWN_SECONDS - time_diff)} 秒后再试。")
+            await nbnhhsh_macher.finish() # 直接结束，不回复，避免刷屏
+            return
+
+    # 更新该用户的最后请求时间
+    user_last_request[user_id] = current_time
+    # [新增] --- 冷却时间检查逻辑结束 ---
+
+    logger.info(f"原始 keywordGroup: {keyword}")
 
     keyword_string = keyword.replace("是什么", "").replace("是啥", "")
     logger.info(f"nbnhhsh keyword: {keyword_string}")
